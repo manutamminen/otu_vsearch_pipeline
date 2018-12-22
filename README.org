@@ -2,6 +2,8 @@
   
 The following is strongly based on [[https://github.com/torognes/vsearch/wiki/VSEARCH-pipeline][this script]] provided on the VSEARCH wiki. Individual parts have been teased apart and wrapped into SLURM batch scripts.
 
+The document is written for [[https://www.gnu.org/software/emacs/][Emacs]] [[https://orgmode.org/][org-mode]], which permits launching the SLURM jobs from a local session.
+
 * Pair merging
 
 #+BEGIN_SRC sh :noweb-ref pair_merging
@@ -102,7 +104,7 @@ EOF
 #+END_SRC
 
 
-#+BEGIN_SRC sh :noweb yes :dir /scp:matammi@taito.csc.fi:/wrk/matammi/Varpu :results value verbatim
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
 ls *filtered* > filtered_files.txt
 
 cat <<'EOF' > dereplication.sh
@@ -181,8 +183,6 @@ sbatch precluster.sh
 #SBATCH -n 6
 #SBATCH --mem-per-cpu=4000
 
-cd /wrk/matammi/Varpu
-
 vsearch --threads 6 --uchime_denovo all.preclustered.fasta \
     --sizein --sizeout --fasta_width 0 \
     --nonchimeras all.denovo.nonchimeras.fasta
@@ -218,7 +218,7 @@ EOF
 #+END_SRC
 
 
-#+BEGIN_SRC sh :noweb yes :dir /scp:matammi@taito.csc.fi:/wrk/matammi/Varpu :results value verbatim
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
 cat <<'EOF' > extract.sh
 <<extract>>
 sbatch extract.sh
@@ -236,8 +236,6 @@ sbatch extract.sh
 #SBATCH -t 02:00:00
 #SBATCH -n 6
 #SBATCH --mem-per-cpu=4000
-
-cd /wrk/matammi/Varpu
 
 vsearch --threads 6 --cluster_size all.nonchimeras.fasta \
     --id 0.97 --strand plus --sizein --sizeout \
@@ -349,8 +347,6 @@ sbatch annotation.sh
 #SBATCH -e tree_errors_%j.txt
 #SBATCH -t 02:00:00
 #SBATCH --mem-per-cpu=8000
-
-cd /wrk/matammi/Varpu
 
 FastTree -nt all.otus.align.clean.fasta > otus.tre
 EOF
