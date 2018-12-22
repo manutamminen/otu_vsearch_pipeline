@@ -1,0 +1,365 @@
+* OTU calling pipeline based on [[https://github.com/torognes/vsearch][VSEARCH]]
+  
+The following is strongly based on [[https://github.com/torognes/vsearch/wiki/VSEARCH-pipeline][this script]] provided on the VSEARCH wiki. Individual parts have been teased apart and wrapped into SLURM batch scripts.
+
+* Pair merging
+
+#+BEGIN_SRC sh :noweb-ref pair_merging
+#!/bin/bash -l
+#SBATCH -J pair_merging_job
+#SBATCH -o pair_merging_job_out_%j.txt
+#SBATCH -e pair_merging_job_err_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH --mem-per-cpu=2000
+#SBATCH --array=1-66
+#SBATCH -n 6
+
+# set input file to be processed
+name=$(sed -n "$SLURM_ARRAY_TASK_ID"p fastq_files.txt)
+forward_read=$(echo $name | awk -F',' '{print $1}')
+reverse_read=$(echo $name | awk -F',' '{print $2}')
+out_name=$(echo $forward_read | awk -F'_' '{print $1"_"$2"_merged.fastq"}')
+
+# run the analysis command
+vsearch --threads 6 --fastq_mergepairs $forward_read \
+        --reverse $reverse_read --fastq_minovlen 200 \
+        --fastq_maxdiffs 15 --fastqout $out_name --fastq_eeout
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+ls *.fastq | paste -d, - - > fastq_files.txt
+
+cat <<'EOF' > pair_merging.sh
+<<pair_merging>>
+sbatch pair_merging.sh
+#+END_SRC
+
+
+
+* Quality filtering
+
+#+BEGIN_SRC sh :noweb-ref quality_filtering
+#!/bin/bash -l
+#SBATCH -J quality_filtering_job
+#SBATCH -o quality_filtering_job_out_%j.txt
+#SBATCH -e quality_filtering_job_err_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH --mem-per-cpu=2000
+#SBATCH --array=1-66
+#SBATCH -n 6
+
+# set input file to be processed
+name=$(sed -n "$SLURM_ARRAY_TASK_ID"p merged_files.txt)
+out_name=$(echo $name | awk -F'_' '{print $1"_"$2"_filtered.fastq"}')
+
+# run the analysis command
+        
+
+vsearch --threads 6 --fastq_filter $name \
+        --fastq_maxee 0.5 --fastq_minlen 225 \
+        --fastq_maxlen 275 --fastq_maxns 0 \
+        --fastaout $out_name --fasta_width 0
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+ls *merged* > merged_files.txt
+
+cat <<'EOF' > quality_filtering.sh
+<<quality_filtering>>
+sbatch quality_filtering.sh
+#+END_SRC
+
+
+
+
+* Dereplication
+
+#+BEGIN_SRC sh :noweb-ref dereplication
+#!/bin/bash -l
+#SBATCH -J dereplication_job
+#SBATCH -o dereplication_job_out_%j.txt
+#SBATCH -e dereplication_job_err_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH --mem-per-cpu=2000
+#SBATCH --array=1-66
+#SBATCH -n 6
+
+# set input file to be processed
+name=$(sed -n "$SLURM_ARRAY_TASK_ID"p filtered_files.txt)
+out_fasta=$(echo $name | awk -F'_' '{print $1"_"$2"_dereplicated.fasta"}')
+out_uc=$(echo $name | awk -F'_' '{print $1"_"$2"_dereplicated.uc"}')
+trunc_name=$(echo $name | awk -F'_' '{print $1"_"$2}')
+
+# run the analysis command
+vsearch --threads 6 --derep_fulllength $name \
+        --strand plus --output $out_fasta \
+        --sizeout --uc $out_uc --relabel $trunc_name. 
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir /scp:matammi@taito.csc.fi:/wrk/matammi/Varpu :results value verbatim
+ls *filtered* > filtered_files.txt
+
+cat <<'EOF' > dereplication.sh
+<<dereplication>>
+sbatch dereplication.sh
+#+END_SRC
+
+#+RESULTS:
+: Submitted batch job 33357712
+
+
+* Combine and dereplicate
+
+#+BEGIN_SRC sh :noweb-ref combine_dereplicate
+#!/bin/bash -l
+#SBATCH -J combine_dereplicate
+#SBATCH -o combine_dereplicate_output_%j.txt
+#SBATCH -e combine_dereplicate_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH -n 6
+#SBATCH --mem-per-cpu=4000
+
+vsearch --threads 6 --derep_fulllength all.fasta \
+    --minuniquesize 2 --sizein \
+    --sizeout --uc all.derep.uc \
+    --output all.derep.fasta
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat *derep*.fasta > all.fasta
+
+cat <<'EOF' > combine_dereplicate.sh
+<<combine_dereplicate>>
+sbatch combine_dereplicate.sh
+#+END_SRC
+
+
+
+* Precluster
+
+#+BEGIN_SRC sh :noweb-ref precluster
+#!/bin/bash -l
+#SBATCH -J precluster
+#SBATCH -o precluster_output_%j.txt
+#SBATCH -e precluster_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH -n 6
+#SBATCH --mem-per-cpu=4000
+
+vsearch --threads 6 --cluster_size all.derep.fasta \
+    --id 0.98 --strand plus --sizein \
+    --sizeout --fasta_width 0 --uc all.preclustered.uc \
+    --centroids all.preclustered.fasta
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat <<'EOF' > precluster.sh
+<<precluster>>
+sbatch precluster.sh
+#+END_SRC
+
+
+
+* Chimera check
+
+#+BEGIN_SRC sh :noweb-ref chimera
+#!/bin/bash -l
+#SBATCH -J chimera
+#SBATCH -o chimera_output_%j.txt
+#SBATCH -e chimera_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH -n 6
+#SBATCH --mem-per-cpu=4000
+
+cd /wrk/matammi/Varpu
+
+vsearch --threads 6 --uchime_denovo all.preclustered.fasta \
+    --sizein --sizeout --fasta_width 0 \
+    --nonchimeras all.denovo.nonchimeras.fasta
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat <<'EOF' > chimera.sh
+<<chimera>>
+sbatch chimera.sh
+#+END_SRC
+
+
+
+* Extract non-chimeras
+  
+The map.pl script is available on the [[https://github.com/torognes/vsearch/wiki/VSEARCH-pipeline][VSEARCH wiki]].
+  
+#+BEGIN_SRC sh :noweb-ref extract
+#!/bin/bash -l
+#SBATCH -J extract
+#SBATCH -o extract_output_%j.txt
+#SBATCH -e extract_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH -n 6
+#SBATCH --mem-per-cpu=4000
+
+perl ./map.pl all.derep.fasta all.preclustered.uc all.denovo.nonchimeras.fasta > all.nonchimeras.derep.fasta
+perl ./map.pl all.fasta all.derep.uc all.nonchimeras.derep.fasta | tr '-' 'X' | tr '_' 'X' > all.nonchimeras.fasta
+
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir /scp:matammi@taito.csc.fi:/wrk/matammi/Varpu :results value verbatim
+cat <<'EOF' > extract.sh
+<<extract>>
+sbatch extract.sh
+#+END_SRC
+
+
+
+* Cluster at 97% and prepare OTU tables
+
+#+BEGIN_SRC sh :noweb-ref otu
+#!/bin/bash -l
+#SBATCH -J otu
+#SBATCH -o otu_output_%j.txt
+#SBATCH -e otu_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH -n 6
+#SBATCH --mem-per-cpu=4000
+
+cd /wrk/matammi/Varpu
+
+vsearch --threads 6 --cluster_size all.nonchimeras.fasta \
+    --id 0.97 --strand plus --sizein --sizeout \
+    --uc all.clustered.uc --relabel OTU_ \
+    --centroids all.otus.fasta --otutabout all.otutab.txt
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat <<'EOF' > otu.sh
+<<otu>>
+sbatch otu.sh
+#+END_SRC
+
+
+
+* Prepare the NAST alignment
+  
+Use the following outgroup:
+#+BEGIN_SRC sh :noweb-ref outgroup
+>JQ837894.1.1415 Archaea;Euryarchaeota;Methanomicrobia;Methanomicrobiales;Methanocorpusculaceae;Methanocalculus;Methanocalculus sp. AMF-B2M
+CTCCGGAGGCTATTGCTATCAGGGTTTGACTAAGCCATGCGAGTCGAGAGGTGTAAGACCTCGGCATACTGCTCAGTAAC
+ACGTGGATAATCTGCCCTCAGGTGAGGAATAATCCCGGGAAACTGGGGCTAATGCCTCATAGGAGACGGGTGCTGGAATG
+CTCTGTCTCCCAAAGGTCCGCCGCCTGAGGATGAGTCTGCGTCCGATTAGGTTGTTGTTGGGGTAACGGCCCAACAAGCC
+ATTGATCGGTACGGGTTGTGGGAGCAAGAGCCCGGAGATGGATTCTGAGACATGAATCCAGGCCCTACGGGGCGCAGCAG
+GCGCGAAAACTTTACAATGCGAGCAATCGTGATAAGGAAACCCTGAGTGCCTGTCAATGCAGGCTGTTCTGGTGTCTAAC
+ACGCACCAGGAGAAAGGGCGGGGCAAGACCGGTGCCAGCCGCCGCGGTAATACCGGCTGCTCGAGTGATAGCCGCTTTTA
+CTGGGCTTAAAGCGTTCGTAGCTTGGTTGTCAAGTCTCTGGGGAAATCTTCTGGCTTAACCAGAAGGCGTCTCAGGGAAA
+CTGGCGACCTAGGAACCGGGAGAGGTGAGACGTACTTCGGGGGTAGGAGTGAAATCTTGTAATCCCCGAGGGACGACCGA
+TGGCGAAGGCATCTCACCAGAACGGCTTCGACAGTGAGGGACGAAAGCTGGGGGAGCAAACCGGATTAGATACCCGGGTA
+GTCCCAGCCGTAAACGATGTGCGTTAGGTGTGTCGGTGACCACGAGTCGCCGAGGTGCCGAAGGGAAACCGTGAAACGCA
+CCGCCTGGGAAGTACGGTCGCAAGGCTGAAACTTAAAGGAATTGGCGGGGGAGCACCACAACGGGTGGAGCCTGCGGTTT
+AATTGGATTCAACGCCGGACAACTCACCGGATACGACAGCGGAATGATAGCCGGGCTGAAGACTCTGCTTGACCAGCTGA
+GAGGAGGTGCATGGCCGTCGTCAGTTCGTACTGTGAAGCATCCTGTTAAGTCAGGCAACGAGCGAGACCCACGCCAACAG
+TTGCCAGCATGGTCTCCGGACTGATGGGGACACTGTTGGGACCGCCTCTGCTAAAGGGGAGGAAGGAATGGGCAACGGTA
+GGTCAGCATGCCCCGAATTATCCGGGCTACACGCGGGCTACAATGGATGGGACAATGGGTTTCGACACCGAAAGGTGAAG
+GTAATCTCCTAACCCCACCCGTAGTTCGGATTGCGGGCTGCAACTCGCCCGCATGAAGCTGGAATCCGTAGTAATCGCGT
+CTCACGATGGCGCGGTGAATATGTCCCTGCTCCTTGCACACACCGCCCGTCAAACCACCCGAGTGGGGTCTGGATGAGGC
+GGCAGTTTATGCTGCTGTCGAATCTAGGTTCCGCAAGGGGGGTTAAGTCGTAACA
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb-ref nast
+#!/bin/bash -l
+#SBATCH -J nast
+#SBATCH -o nast_output_%j.txt
+#SBATCH -e nast_errors_%j.txt
+#SBATCH -t 08:00:00
+#SBATCH --mem-per-cpu=32000
+
+/homeappl/home/matammi/sina-1.2.11/sina -i all.otus.outgroup.fasta --intype fasta -o all.otus.align.fasta --outtype fasta --ptdb /wrk/matammi/sina/SSURef_NR99_128_SILVA_07_09_16_opt.arb
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat <<'EOF' > outgroup.fasta
+<<outgroup>>
+
+cat outgroup.fasta all.otus.fasta > all.otus.outgroup.fasta
+
+cat <<'EOF' > nast.sh
+<<nast>>
+sbatch nast.sh
+#+END_SRC
+
+
+
+* Annotate the sequences
+  
+Download the reference database
+  
+wget ftp://greengenes.microbio.me/greengenes_release/gg_13_5/gg_13_8_otus.tar.gz
+
+assign_taxonomy.py -i otus.fa -r /wrk/bio_workshop/SILVA123_QIIME_release/rep_set/rep_set_16S_only/99/99_otus_16S.fasta -t /wrk/bio_workshop/SILVA123_QIIME_release/taxonomy/16S_only/99/consensus_taxonomy_all_levels.txt -o silva_bac_taxonomy
+
+#+BEGIN_SRC sh :noweb-ref annotation
+#!/bin/bash -l
+#SBATCH -J annotation
+#SBATCH -o annotation_output_%j.txt
+#SBATCH -e annotation_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH --mem-per-cpu=32000
+
+module load qiime/1.9.1
+
+assign_taxonomy.py -i all.otus.fasta -r ../greengenes/gg_13_8_otus/rep_set/99_otus.fasta -t ../greengenes/gg_13_8_otus/taxonomy/99_otu_taxonomy.txt -o silva_bac_taxonomy
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+rm -Rf silva_bac_taxonomy
+cat <<'EOF' > annotation.sh
+<<annotation>>
+sbatch annotation.sh
+#+END_SRC
+
+
+
+* Prepare the phylogeny
+  
+#+BEGIN_SRC sh :noweb-ref tree
+#!/bin/bash -l
+#SBATCH -J tree
+#SBATCH -o tree_output_%j.txt
+#SBATCH -e tree_errors_%j.txt
+#SBATCH -t 02:00:00
+#SBATCH --mem-per-cpu=8000
+
+cd /wrk/matammi/Varpu
+
+FastTree -nt all.otus.align.clean.fasta > otus.tre
+EOF
+#+END_SRC
+
+
+#+BEGIN_SRC sh :noweb yes :dir :results value verbatim
+cat <<'EOF' > tree.sh
+<<tree>>
+sbatch tree.sh
+#+END_SRC
+
