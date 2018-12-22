@@ -255,6 +255,8 @@ sbatch otu.sh
 
 * Prepare the NAST alignment
   
+Download the reference alignment from https://www.arb-silva.de/fileadmin/arb_web_db/release_128/ARB_files/SSURef_NR99_128_SILVA_07_09_16_opt.arb.gz.
+  
 Use the following outgroup:
 #+BEGIN_SRC sh :noweb-ref outgroup
 >JQ837894.1.1415 Archaea;Euryarchaeota;Methanomicrobia;Methanomicrobiales;Methanocorpusculaceae;Methanocalculus;Methanocalculus sp. AMF-B2M
@@ -308,7 +310,7 @@ sbatch nast.sh
 
 * Annotate the sequences
   
-Use the reference database ftp://greengenes.microbio.me/greengenes_release/gg_13_5/gg_13_8_otus.tar.gz.
+Download the reference database from ftp://greengenes.microbio.me/greengenes_release/gg_13_5/gg_13_8_otus.tar.gz.
 
 #+BEGIN_SRC sh :noweb-ref annotation
 #!/bin/bash -l
