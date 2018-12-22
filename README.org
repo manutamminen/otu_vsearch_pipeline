@@ -2,7 +2,7 @@
   
 The following is strongly based on [[https://github.com/torognes/vsearch/wiki/VSEARCH-pipeline][this script]] provided on the VSEARCH wiki. Individual parts have been teased apart and wrapped into SLURM batch scripts.
 
-The document is written for [[https://www.gnu.org/software/emacs/][Emacs]] [[https://orgmode.org/][org-mode]], which permits launching the SLURM jobs from a local session.
+The document is written for [[https://www.gnu.org/software/emacs/][Emacs]] [[https://orgmode.org/][org-mode]] which permits launching the SLURM jobs from a local session.
 
 * Pair merging
 
