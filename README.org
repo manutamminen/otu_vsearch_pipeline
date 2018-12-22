@@ -357,3 +357,94 @@ cat <<'EOF' > tree.sh
 sbatch tree.sh
 #+END_SRC
 
+
+* Prepare the annotation colors for iTol
+  
+#+BEGIN_SRC R
+library(tidyverse)
+library(glue)
+library(phyloseq)
+
+barchart_template = "
+DATASET_SIMPLEBAR
+SEPARATOR COMMA
+DATASET_LABEL,{Sample}
+COLOR,#547261
+BORDER_WIDTH,0
+BORDER_COLOR,#547261
+WIDTH,100
+DATA
+{Text}
+"
+
+popup_template = "
+POPUP_INFO
+SEPARATOR COMMA
+DATA
+{Popup_text}
+"
+
+range_template = "
+TREE_COLORS
+SEPARATOR COMMA
+DATA
+{Color_text}
+"
+
+create_rnd_col <- function()
+{
+    rgb(
+        data.frame(
+            X1=sample(1:100, 1)/100,
+            X2=sample(1:100, 1)/100,
+            X3=sample(1:100, 1)/100))
+}
+
+read_delim("all.otutab.txt", comment = "", col_names = TRUE, delim = "\t") %>%
+    rename_all(~str_replace_all(., '\\#', '')) %>%
+    rename_all(~str_replace_all(., ' ', '_')) %>%
+    rename_all(~str_replace_all(., 'X', '-')) %>%
+    gather(Sample, Count, -OTU_ID) %>%
+    group_by(Sample) %>%
+    mutate(OTU_Sum = sum(Count),
+           OTU_Perc = Count/OTU_Sum) %>%
+    unite(Out, OTU_ID, OTU_Perc, sep=",") %>%
+    select(Sample, Out) %>%
+    group_by(Sample) %>%
+    summarise(Text = paste(Out, collapse="\n")) %>%
+    mutate(Out_text = glue(barchart_template),
+           Sample = paste(Sample, ".txt", sep=""),
+           Out_file = map2(Sample, Out_text, ~write(.y, .x)))
+
+read_delim("all.otus_tax_assignments.txt", comment = "", col_names = FALSE, delim = "\t") %>%
+    separate(X1, into=c("OTU", "Size"), sep=";") %>%
+    separate(X2, into=c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
+             sep = "; ", remove = FALSE) %>%
+    group_by(Class) %>%
+    nest %>%
+    mutate(Color = map_chr(Class, ~create_rnd_col()),
+           Label = "label") %>%
+    unnest %>%
+    unite(iTOL_Color, OTU, Label, Color, sep=",", remove = FALSE)  %>%
+    unite(iTOL_Annotation, OTU, Species, X2, sep=",") %>%
+    summarise(Color_text = paste(iTOL_Color, collapse="\n"),
+              Popup_text = paste(iTOL_Annotation, collapse="\n")) %>%
+    mutate(Color_out = glue(range_template),
+           Popup_out = glue(popup_template),
+           Out1 = map(Color_out, ~write(., "itol_colors.txt")),
+           Out2 = map(Popup_out, ~write(., "itol_popup.txt")))
+
+read_delim("all.otutab.txt", comment = "", col_names = TRUE, delim = "\t") %>%
+    rename_all(~str_replace_all(., '\\#', '')) %>%
+    rename_all(~str_replace_all(., ' ', '_')) %>%
+    rename_all(~str_replace_all(., 'X', '-')) %>%
+    gather(Sample, Count, -OTU_ID) %>%
+    group_by(Sample) %>%
+    mutate(OTU_Sum = sum(Count),
+           OTU_Perc = Count/OTU_Sum) %>%
+    select(-Count, -OTU_Sum) %>%
+    ggplot(aes(x=Sample, y=OTU_ID)) + geom_tile(aes(fill=OTU_Perc), colour="white") +
+    scale_fill_gradient(low = "white", high = "red")
+    
+#+END_SRC
+
